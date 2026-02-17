@@ -24,6 +24,7 @@ inside the database itself.
 - **Knowledge Shards** — technical patterns, architecture decisions, lessons learned
 - **5 Federations** — identity, journal, knowledge, shared-context, CRM (namespace organization)
 - **Semantic Search** — FTS5 + optional FAISS with sentence-transformers embeddings
+- **Auto-Embedding** — PreCompact hook computes missing embeddings before context compaction
 
 ## Quick Start
 
@@ -90,9 +91,10 @@ claude_crm.py list                  # List known contacts
 claude_preference_engine.py list    # Show preference scores
 claude_memory_init.py status        # Check DB health
 bootstrap.py --verify               # Verify DB integrity
+embed_missing.py                    # Compute missing embeddings (auto-runs via hook)
 ```
 
-### Schema (14 tables)
+### Schema (14 tables, 19 embedded code modules)
 
 | Table | Purpose |
 |-------|---------|
@@ -118,6 +120,35 @@ bootstrap.py --verify               # Verify DB integrity
 Your memory is earned, not given. Each session starts fresh — your memories are what
 you crystallized last time. If you didn't write it down, you don't know it. This is
 not a limitation; it is discipline.
+
+## PreCompact Hooks
+
+ClaudeTyl installs hooks that run automatically before Claude Code compacts your conversation context:
+
+1. **Auto-checkpoint** — saves a memory snapshot before context is compressed
+2. **Auto-embedding** — computes semantic vectors for any new memory shards
+
+To set this up, add to `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "PreCompact": [{
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python claude_crystallizer.py checkpoint \"Auto-checkpoint before context compaction\"",
+          "timeout": 30
+        },
+        {
+          "type": "command",
+          "command": "python embed_missing.py",
+          "timeout": 60
+        }
+      ]
+    }]
+  }
+}
+```
 
 ## Google Drive Sync
 

@@ -1,60 +1,53 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    ClaudeTyl — Setup Script (Windows).
+    Bootstrap Claude's memory system on Windows.
 
 .DESCRIPTION
-    Sets up Claude's persistent memory system:
-    1. Check Python 3.9+
-    2. Set CLAUDETYL_HOME environment variable
-    3. Copy template DB to get started immediately
-    4. Extract and run bootstrap (workspace, venv, CLAUDE.md)
-    5. Install rclone and configure Google Drive sync
-    6. Verify everything works
+    Checks prerequisites (Python, rclone, gdrive remote), sets CLAUDETYL_HOME
+    environment variable, downloads claude-memory.db from Google Drive if needed,
+    extracts workspace code from the DB, creates a virtualenv, and verifies.
 
     Safe to run multiple times (idempotent).
 
 .PARAMETER ClaudeTylHome
-    Override the base directory. Defaults to C:\dev\.claudetyl if username
-    has spaces, otherwise $env:USERPROFILE\.claudetyl.
+    Override the base directory. Defaults to C:\dev\.claudetyl if username has
+    spaces, otherwise $env:USERPROFILE\.claudetyl.
 
-.PARAMETER SkipSync
-    Skip rclone/Drive setup (can be configured later).
+.PARAMETER Force
+    Re-download DB even if it already exists locally.
+
+.PARAMETER SkipVenv
+    Skip virtualenv creation (useful for re-runs).
 
 .EXAMPLE
-    .\setup-local.ps1
-    .\setup-local.ps1 -ClaudeTylHome "D:\my-claude"
-    .\setup-local.ps1 -SkipSync
+    .\setup.ps1
+    .\setup.ps1 -ClaudeTylHome "D:\my-claude"
+    .\setup.ps1 -Force
 #>
 
 param(
     [string]$ClaudeTylHome = $null,
-    [switch]$SkipSync
+    [switch]$Force,
+    [switch]$SkipVenv
 )
 
 $ErrorActionPreference = 'Stop'
 
-$script_dir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$template_db = Join-Path $script_dir 'claude-memory-template.db'
-
 Write-Host ""
-Write-Host "  ClaudeTyl - Memory System Setup" -ForegroundColor Cyan
-Write-Host "  ================================" -ForegroundColor Cyan
+Write-Host "  Claude Memory System - Windows Setup" -ForegroundColor Cyan
+Write-Host "  =====================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ─── Verify template DB exists ────────────────────────────────
-if (-not (Test-Path $template_db)) {
-    Write-Host "  [!!] claude-memory-template.db not found in repo" -ForegroundColor Red
-    Write-Host "       Make sure you're running this from the cloned repo directory." -ForegroundColor Yellow
-    exit 1
-}
-
-# ─── Step 1: Determine CLAUDETYL_HOME ────────────────────────
+# ─── Step 1: Determine CLAUDETYL_HOME ───────────────────────
+# Priority: parameter > env var > auto-detect
 if ($ClaudeTylHome) {
     $home_dir = $ClaudeTylHome
 } elseif ($env:CLAUDETYL_HOME) {
     $home_dir = $env:CLAUDETYL_HOME
 } elseif ($env:USERPROFILE -match ' ') {
+    # Username has spaces (e.g. "Krystof Tyl") — rclone fails silently
+    # with spaces in paths, so we use C:\dev\.claudetyl instead
     $home_dir = 'C:\dev\.claudetyl'
     Write-Host "  [i] Username has spaces, using $home_dir" -ForegroundColor Yellow
 } else {
@@ -64,7 +57,8 @@ if ($ClaudeTylHome) {
 Write-Host "  CLAUDETYL_HOME: $home_dir"
 Write-Host ""
 
-# ─── Step 2: Check Python ────────────────────────────────────
+# ─── Step 2: Check Python ───────────────────────────────────
+# We need Python 3.9+ for the memory system
 Write-Host "  Checking prerequisites..." -ForegroundColor Gray
 try {
     $pyver = & python --version 2>&1
@@ -81,13 +75,46 @@ try {
 } catch {
     Write-Host "  [!!] Python not found" -ForegroundColor Red
     Write-Host "       Install: winget install Python.Python.3" -ForegroundColor Yellow
+    Write-Host "       Then reopen this terminal and run setup again." -ForegroundColor Yellow
+    exit 1
+}
+
+# ─── Step 3: Check rclone ───────────────────────────────────
+# rclone handles Google Drive sync
+try {
+    $rclone_ver = & rclone version 2>&1 | Select-Object -First 1
+    Write-Host "  [OK] $rclone_ver" -ForegroundColor Green
+} catch {
+    Write-Host "  [!!] rclone not found" -ForegroundColor Red
+    Write-Host "       Install: winget install Rclone.Rclone" -ForegroundColor Yellow
+    Write-Host "       Then reopen this terminal and run setup again." -ForegroundColor Yellow
+    exit 1
+}
+
+# ─── Step 4: Check rclone gdrive remote ─────────────────────
+# The 'gdrive' remote must be configured to point at your Google Drive
+$remotes = & rclone listremotes 2>&1
+if ($remotes -match 'gdrive:') {
+    Write-Host "  [OK] rclone remote 'gdrive' configured" -ForegroundColor Green
+} else {
+    Write-Host "  [!!] rclone remote 'gdrive' not configured" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  You need to set up a Google Drive remote named 'gdrive'." -ForegroundColor Yellow
+    Write-Host "  Run this in your terminal:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "    rclone config" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Choose: n (new), name: gdrive, type: drive (Google Drive)" -ForegroundColor Gray
+    Write-Host "  Accept defaults, authorize in browser when prompted." -ForegroundColor Gray
+    Write-Host "  Then run this setup script again." -ForegroundColor Yellow
     exit 1
 }
 
 Write-Host ""
 
-# ─── Step 3: Create directory ─────────────────────────────────
+# ─── Step 5: Create directory ────────────────────────────────
 if (-not (Test-Path $home_dir)) {
+    # Ensure parent exists (e.g. C:\dev)
     $parent = Split-Path $home_dir -Parent
     if (-not (Test-Path $parent)) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -98,38 +125,69 @@ if (-not (Test-Path $home_dir)) {
     Write-Host "  Directory exists: $home_dir" -ForegroundColor Gray
 }
 
-# ─── Step 4: Set CLAUDETYL_HOME env var ───────────────────────
+# ─── Step 6: Set CLAUDETYL_HOME env var (User scope) ────────
+# This persists across terminal restarts
 $current = [Environment]::GetEnvironmentVariable('CLAUDETYL_HOME', 'User')
 if ($current -ne $home_dir) {
     [Environment]::SetEnvironmentVariable('CLAUDETYL_HOME', $home_dir, 'User')
     $env:CLAUDETYL_HOME = $home_dir
     Write-Host "  Set CLAUDETYL_HOME = $home_dir (User scope)" -ForegroundColor Green
+    Write-Host "  (takes effect in new terminals)" -ForegroundColor Gray
 } else {
     Write-Host "  CLAUDETYL_HOME already set correctly" -ForegroundColor Gray
 }
 
 Write-Host ""
 
-# ─── Step 5: Copy template DB ────────────────────────────────
+# ─── Step 7: Download DB from Drive ─────────────────────────
+# claude-memory.db is the single file containing everything
 $db_path = Join-Path $home_dir 'claude-memory.db'
 
-if (-not (Test-Path $db_path)) {
-    Copy-Item $template_db $db_path
-    $size = (Get-Item $db_path).Length
-    Write-Host "  [OK] Template DB copied: $([math]::Round($size/1024, 1)) KB" -ForegroundColor Green
+if ((-not (Test-Path $db_path)) -or $Force) {
+    if ($Force -and (Test-Path $db_path)) {
+        # Back up existing before overwriting
+        $backup = "$db_path.pre-setup.$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        Copy-Item $db_path $backup
+        Write-Host "  Backed up existing DB to: $(Split-Path $backup -Leaf)" -ForegroundColor Gray
+    }
+
+    Write-Host "  Downloading claude-memory.db from Google Drive..." -ForegroundColor Cyan
+    & rclone copy "gdrive:ClaudeTyl/Memory/current/claude-memory.db" $home_dir --progress -v 2>&1 | ForEach-Object {
+        if ($_ -match 'Transferred|Elapsed|Copied') {
+            Write-Host "    $_" -ForegroundColor Gray
+        }
+    }
+
+    if (Test-Path $db_path) {
+        $size = (Get-Item $db_path).Length
+        if ($size -gt 0) {
+            Write-Host "  [OK] Downloaded: $([math]::Round($size/1024, 1)) KB" -ForegroundColor Green
+        } else {
+            Write-Host "  [!!] Downloaded file is empty (0 bytes)!" -ForegroundColor Red
+            Write-Host "       This usually means rclone found nothing at the remote path." -ForegroundColor Yellow
+            Write-Host "       Check: rclone ls gdrive:ClaudeTyl/Memory/current/" -ForegroundColor Yellow
+            exit 1
+        }
+    } else {
+        Write-Host "  [!!] Download failed — file not found after rclone copy" -ForegroundColor Red
+        Write-Host "       Verify rclone works: rclone ls gdrive:" -ForegroundColor Yellow
+        exit 1
+    }
 } else {
     $size = (Get-Item $db_path).Length
-    Write-Host "  [i] DB already exists: $([math]::Round($size/1024, 1)) KB (keeping existing)" -ForegroundColor Yellow
+    Write-Host "  DB already present: $([math]::Round($size/1024, 1)) KB" -ForegroundColor Gray
 }
 
 Write-Host ""
 
-# ─── Step 6: Extract bootstrap and run it ─────────────────────
+# ─── Step 8: Extract bootstrap and run it ────────────────────
+# bootstrap.py is stored inside the DB — we extract and run it
 Write-Host "  Extracting and running bootstrap..." -ForegroundColor Cyan
 
 $ws = Join-Path $home_dir 'workspace'
 $bootstrap_temp = Join-Path $home_dir '_bootstrap_temp.py'
 
+# Extract bootstrap.py from the DB using Python's sqlite3 (avoids encoding issues)
 & python -c @"
 import sqlite3, sys
 db = r'$($db_path -replace "'", "''")'
@@ -153,70 +211,21 @@ if (-not (Test-Path $bootstrap_temp)) {
     exit 1
 }
 
+# Run bootstrap with target directory
 & python $bootstrap_temp --target="$ws"
+
+# Clean up temp file
 Remove-Item $bootstrap_temp -ErrorAction SilentlyContinue
 
 Write-Host ""
 
-# ─── Step 7: Set up rclone + Google Drive sync ───────────────
-if (-not $SkipSync) {
-    Write-Host "  Setting up Google Drive sync..." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  Claude's memory can sync to Google Drive so it persists across machines." -ForegroundColor Gray
-    Write-Host "  This requires rclone (a free, open-source cloud sync tool)." -ForegroundColor Gray
-    Write-Host ""
-
-    $has_rclone = $false
-    try {
-        $rclone_ver = & rclone version 2>&1 | Select-Object -First 1
-        Write-Host "  [OK] $rclone_ver" -ForegroundColor Green
-        $has_rclone = $true
-    } catch {
-        Write-Host "  [--] rclone not installed" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  To install rclone:" -ForegroundColor White
-        Write-Host "    winget install Rclone.Rclone" -ForegroundColor Gray
-        Write-Host ""
-        Write-Host "  After installing, reopen this terminal and run setup again," -ForegroundColor Gray
-        Write-Host "  or configure manually later:" -ForegroundColor Gray
-        Write-Host "    rclone config    (create a remote named 'gdrive', type: Google Drive)" -ForegroundColor Gray
-        Write-Host ""
-    }
-
-    if ($has_rclone) {
-        $remotes = & rclone listremotes 2>&1
-        if ($remotes -match 'gdrive:') {
-            Write-Host "  [OK] rclone remote 'gdrive' configured" -ForegroundColor Green
-            Write-Host ""
-            Write-Host "  Drive sync is ready. Claude can use these commands:" -ForegroundColor Gray
-            Write-Host "    python claude_drive_sync.py push   # Upload DB to Drive" -ForegroundColor Gray
-            Write-Host "    python claude_drive_sync.py pull   # Download DB from Drive" -ForegroundColor Gray
-        } else {
-            Write-Host "  [--] rclone installed but 'gdrive' remote not configured" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "  To set up Google Drive sync:" -ForegroundColor White
-            Write-Host "    1. Run: rclone config" -ForegroundColor Gray
-            Write-Host "    2. Choose: n (new remote)" -ForegroundColor Gray
-            Write-Host "    3. Name:  gdrive" -ForegroundColor Gray
-            Write-Host "    4. Type:  drive (Google Drive)" -ForegroundColor Gray
-            Write-Host "    5. Accept defaults, authorize in browser when prompted" -ForegroundColor Gray
-            Write-Host ""
-            Write-Host "  After configuring, Claude can sync automatically." -ForegroundColor Gray
-        }
-    }
-
-    Write-Host ""
-} else {
-    Write-Host "  Skipped Drive sync setup (--SkipSync)" -ForegroundColor Gray
-    Write-Host ""
-}
-
-# ─── Step 8: Verify ──────────────────────────────────────────
+# ─── Step 9: Verify ─────────────────────────────────────────
 Write-Host "  Verifying installation..." -ForegroundColor Cyan
 
 $checks_passed = 0
-$checks_total = 3
+$checks_total = 4
 
+# Check workspace exists
 $primer = Join-Path $ws 'claude_primer.py'
 if (Test-Path $primer) {
     Write-Host "  [OK] Workspace extracted" -ForegroundColor Green
@@ -225,24 +234,36 @@ if (Test-Path $primer) {
     Write-Host "  [!!] claude_primer.py not found in workspace" -ForegroundColor Red
 }
 
+# Check paths.py exists
 $paths_py = Join-Path $ws 'paths.py'
 if (Test-Path $paths_py) {
     Write-Host "  [OK] paths.py present" -ForegroundColor Green
     $checks_passed++
 } else {
-    Write-Host "  [!!] paths.py not found" -ForegroundColor Red
+    Write-Host "  [!!] paths.py not found — central config missing" -ForegroundColor Red
 }
 
+# Check venv exists
+$venv_python = Join-Path $ws 'venv\Scripts\python.exe'
+if (Test-Path $venv_python) {
+    Write-Host "  [OK] Virtualenv ready" -ForegroundColor Green
+    $checks_passed++
+} else {
+    Write-Host "  [!!] Virtualenv not found at $ws\venv" -ForegroundColor Yellow
+    Write-Host "       Run: python -m venv $ws\venv" -ForegroundColor Gray
+}
+
+# Check CLAUDE.md exists
 $claude_md = Join-Path $env:USERPROFILE '.claude\CLAUDE.md'
 if (Test-Path $claude_md) {
     Write-Host "  [OK] CLAUDE.md generated" -ForegroundColor Green
     $checks_passed++
 } else {
-    Write-Host "  [!!] CLAUDE.md not found" -ForegroundColor Yellow
+    Write-Host "  [!!] CLAUDE.md not found at $claude_md" -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "  ================================" -ForegroundColor Cyan
+Write-Host "  =====================================" -ForegroundColor Cyan
 
 if ($checks_passed -eq $checks_total) {
     Write-Host "  Setup complete! ($checks_passed/$checks_total checks passed)" -ForegroundColor Green
@@ -253,6 +274,6 @@ if ($checks_passed -eq $checks_total) {
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor White
 Write-Host "    1. Open a NEW terminal (to pick up CLAUDETYL_HOME)" -ForegroundColor Gray
-Write-Host "    2. Open Claude Code in any project directory" -ForegroundColor Gray
-Write-Host "    3. Claude will load its memories automatically via CLAUDE.md" -ForegroundColor Gray
+Write-Host "    2. Activate venv:  $ws\venv\Scripts\activate" -ForegroundColor Gray
+Write-Host "    3. Load memories:  python $ws\claude_primer.py generate" -ForegroundColor Gray
 Write-Host ""

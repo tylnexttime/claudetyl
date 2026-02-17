@@ -1,52 +1,40 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-# ClaudeTyl — Setup Script (Linux/macOS)
+# Claude Memory System — Linux/macOS Setup
 #
-# Sets up Claude's persistent memory system:
-# 1. Check Python 3.9+
-# 2. Set CLAUDETYL_HOME environment variable
-# 3. Copy template DB to get started immediately
-# 4. Extract and run bootstrap (workspace, venv, CLAUDE.md)
-# 5. Check/guide rclone + Google Drive sync setup
-# 6. Verify everything works
+# Checks prerequisites (Python 3.9+, rclone, gdrive remote),
+# sets CLAUDETYL_HOME, downloads claude-memory.db from Google Drive,
+# extracts workspace code, creates virtualenv, and verifies.
 #
 # Safe to run multiple times (idempotent).
 #
 # Usage:
-#   bash setup-local.sh                     # Standard setup
-#   bash setup-local.sh --home /custom/path # Custom base dir
-#   bash setup-local.sh --skip-sync         # Skip rclone setup
+#   bash setup.sh                              # Standard setup
+#   bash setup.sh --home /custom/path          # Custom base dir
+#   bash setup.sh --force                      # Re-download DB
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# ─── Parse arguments ────────────────────────────────────────
 CUSTOM_HOME=""
-SKIP_SYNC=false
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --home)       CUSTOM_HOME="$2"; shift 2 ;;
-        --skip-sync)  SKIP_SYNC=true; shift ;;
-        -h|--help)    echo "Usage: bash setup-local.sh [--home DIR] [--skip-sync]"; exit 0 ;;
-        *)            echo "Unknown option: $1"; exit 1 ;;
+        --home)    CUSTOM_HOME="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
+        -h|--help) echo "Usage: bash setup.sh [--home DIR] [--force]"; exit 0 ;;
+        *)         echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TEMPLATE_DB="$SCRIPT_DIR/claude-memory-template.db"
-
 echo ""
-echo "  ClaudeTyl — Memory System Setup"
-echo "  ================================"
+echo "  Claude Memory System — Linux/macOS Setup"
+echo "  ========================================="
 echo ""
 
-# ─── Verify template DB exists ────────────────────────────────
-if [[ ! -f "$TEMPLATE_DB" ]]; then
-    echo "  [!!] claude-memory-template.db not found in repo"
-    echo "       Make sure you're running this from the cloned repo directory."
-    exit 1
-fi
-
-# ─── Step 1: Determine CLAUDETYL_HOME ────────────────────────
+# ─── Step 1: Determine CLAUDETYL_HOME ───────────────────────
+# Priority: --home flag > env var > default ~/.claudetyl
 if [[ -n "$CUSTOM_HOME" ]]; then
     HOME_DIR="$CUSTOM_HOME"
 elif [[ -n "${CLAUDETYL_HOME:-}" ]]; then
@@ -58,7 +46,7 @@ fi
 echo "  CLAUDETYL_HOME: $HOME_DIR"
 echo ""
 
-# ─── Step 2: Check Python 3.9+ ───────────────────────────────
+# ─── Step 2: Check Python 3.9+ ──────────────────────────────
 echo "  Checking prerequisites..."
 if command -v python3 &>/dev/null; then
     PY_VER=$(python3 --version 2>&1)
@@ -67,32 +55,70 @@ if command -v python3 &>/dev/null; then
         echo "  [OK] $PY_VER"
     else
         echo "  [!!] Python 3.9+ required, found $PY_VER"
+        echo "       Install: sudo apt install python3 (Ubuntu)"
+        echo "                brew install python3 (macOS)"
         exit 1
     fi
 else
     echo "  [!!] Python3 not found"
-    echo "       Install: sudo apt install python3 (Ubuntu) or brew install python3 (macOS)"
+    echo "       Install: sudo apt install python3 (Ubuntu)"
+    echo "                brew install python3 (macOS)"
+    exit 1
+fi
+
+# ─── Step 3: Check rclone ───────────────────────────────────
+# rclone handles Google Drive sync
+if command -v rclone &>/dev/null; then
+    RCLONE_VER=$(rclone version 2>&1 | head -1)
+    echo "  [OK] $RCLONE_VER"
+else
+    echo "  [!!] rclone not found"
+    echo "       Install: curl https://rclone.org/install.sh | sudo bash"
+    echo "                or: sudo apt install rclone (Ubuntu)"
+    echo "                or: brew install rclone (macOS)"
+    exit 1
+fi
+
+# ─── Step 4: Check rclone gdrive remote ─────────────────────
+# The 'gdrive' remote must point to your Google Drive
+if rclone listremotes 2>/dev/null | grep -q 'gdrive:'; then
+    echo "  [OK] rclone remote 'gdrive' configured"
+else
+    echo "  [!!] rclone remote 'gdrive' not configured"
+    echo ""
+    echo "  You need to set up a Google Drive remote named 'gdrive'."
+    echo "  Run:"
+    echo ""
+    echo "    rclone config"
+    echo ""
+    echo "  Choose: n (new), name: gdrive, type: drive (Google Drive)"
+    echo "  Accept defaults, authorize in browser when prompted."
+    echo "  Then run this setup script again."
     exit 1
 fi
 
 echo ""
 
-# ─── Step 3: Create directory ─────────────────────────────────
+# ─── Step 5: Create directory ────────────────────────────────
 mkdir -p "$HOME_DIR"
+echo "  Directory: $HOME_DIR"
 
-# ─── Step 4: Set CLAUDETYL_HOME in shell profile ─────────────
+# ─── Step 6: Set CLAUDETYL_HOME in shell profile ────────────
+# Detect which shell profile to update
 PROFILE=""
 if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *"zsh"* ]]; then
     PROFILE="$HOME/.zshrc"
 elif [[ -f "$HOME/.bashrc" ]]; then
     PROFILE="$HOME/.bashrc"
+elif [[ -f "$HOME/.bash_profile" ]]; then
+    PROFILE="$HOME/.bash_profile"
 else
     PROFILE="$HOME/.bashrc"
 fi
 
 if ! grep -q 'CLAUDETYL_HOME' "$PROFILE" 2>/dev/null; then
     echo "" >> "$PROFILE"
-    echo "# ClaudeTyl Memory System" >> "$PROFILE"
+    echo "# Claude Memory System" >> "$PROFILE"
     echo "export CLAUDETYL_HOME=\"$HOME_DIR\"" >> "$PROFILE"
     echo "  Added CLAUDETYL_HOME to $PROFILE"
 else
@@ -100,21 +126,48 @@ else
 fi
 export CLAUDETYL_HOME="$HOME_DIR"
 
-# ─── Step 5: Copy template DB ────────────────────────────────
+echo ""
+
+# ─── Step 7: Download DB from Drive ─────────────────────────
+# claude-memory.db is the single file containing everything
 DB_PATH="$HOME_DIR/claude-memory.db"
 
-if [[ ! -f "$DB_PATH" ]]; then
-    cp "$TEMPLATE_DB" "$DB_PATH"
-    SIZE=$(stat -f%z "$DB_PATH" 2>/dev/null || stat -c%s "$DB_PATH")
-    echo "  [OK] Template DB copied: $((SIZE / 1024)) KB"
+if [[ ! -f "$DB_PATH" ]] || $FORCE; then
+    if $FORCE && [[ -f "$DB_PATH" ]]; then
+        BACKUP="$DB_PATH.pre-setup.$(date +%Y%m%d_%H%M%S)"
+        cp "$DB_PATH" "$BACKUP"
+        echo "  Backed up existing DB to: $(basename "$BACKUP")"
+    fi
+
+    echo "  Downloading claude-memory.db from Google Drive..."
+    rclone copy "gdrive:ClaudeTyl/Memory/current/claude-memory.db" "$HOME_DIR" --progress -v 2>&1 | \
+        grep -E 'Transferred|Elapsed|Copied' | while read -r line; do
+            echo "    $line"
+        done
+
+    if [[ -f "$DB_PATH" ]]; then
+        SIZE=$(stat -f%z "$DB_PATH" 2>/dev/null || stat -c%s "$DB_PATH")
+        if [[ "$SIZE" -gt 0 ]]; then
+            echo "  [OK] Downloaded: $((SIZE / 1024)) KB"
+        else
+            echo "  [!!] Downloaded file is empty (0 bytes)!"
+            echo "       Check: rclone ls gdrive:ClaudeTyl/Memory/current/"
+            exit 1
+        fi
+    else
+        echo "  [!!] Download failed — file not found after rclone copy"
+        echo "       Verify rclone works: rclone ls gdrive:"
+        exit 1
+    fi
 else
     SIZE=$(stat -f%z "$DB_PATH" 2>/dev/null || stat -c%s "$DB_PATH")
-    echo "  [i] DB already exists: $((SIZE / 1024)) KB (keeping existing)"
+    echo "  DB already present: $((SIZE / 1024)) KB"
 fi
 
 echo ""
 
-# ─── Step 6: Extract bootstrap and run it ─────────────────────
+# ─── Step 8: Extract bootstrap and run it ────────────────────
+# bootstrap.py is stored inside the DB — extract and run it
 echo "  Extracting and running bootstrap..."
 
 WS="$HOME_DIR/workspace"
@@ -148,64 +201,13 @@ rm -f "$BOOTSTRAP_TEMP"
 
 echo ""
 
-# ─── Step 7: Set up rclone + Google Drive sync ───────────────
-if ! $SKIP_SYNC; then
-    echo "  Setting up Google Drive sync..."
-    echo ""
-    echo "  Claude's memory can sync to Google Drive so it persists across machines."
-    echo "  This requires rclone (a free, open-source cloud sync tool)."
-    echo ""
-
-    HAS_RCLONE=false
-    if command -v rclone &>/dev/null; then
-        RCLONE_VER=$(rclone version 2>&1 | head -1)
-        echo "  [OK] $RCLONE_VER"
-        HAS_RCLONE=true
-    else
-        echo "  [--] rclone not installed"
-        echo ""
-        echo "  To install rclone:"
-        echo "    curl https://rclone.org/install.sh | sudo bash   (Linux)"
-        echo "    brew install rclone                               (macOS)"
-        echo ""
-        echo "  After installing, run this setup again or configure manually:"
-        echo "    rclone config    (create a remote named 'gdrive', type: Google Drive)"
-        echo ""
-    fi
-
-    if $HAS_RCLONE; then
-        if rclone listremotes 2>/dev/null | grep -q 'gdrive:'; then
-            echo "  [OK] rclone remote 'gdrive' configured"
-            echo ""
-            echo "  Drive sync is ready. Claude can use these commands:"
-            echo "    python3 claude_drive_sync.py push   # Upload DB to Drive"
-            echo "    python3 claude_drive_sync.py pull   # Download DB from Drive"
-        else
-            echo "  [--] rclone installed but 'gdrive' remote not configured"
-            echo ""
-            echo "  To set up Google Drive sync:"
-            echo "    1. Run: rclone config"
-            echo "    2. Choose: n (new remote)"
-            echo "    3. Name:  gdrive"
-            echo "    4. Type:  drive (Google Drive)"
-            echo "    5. Accept defaults, authorize in browser when prompted"
-            echo ""
-            echo "  After configuring, Claude can sync automatically."
-        fi
-    fi
-
-    echo ""
-else
-    echo "  Skipped Drive sync setup (--skip-sync)"
-    echo ""
-fi
-
-# ─── Step 8: Verify ──────────────────────────────────────────
+# ─── Step 9: Verify ─────────────────────────────────────────
 echo "  Verifying installation..."
 
 CHECKS_PASSED=0
-CHECKS_TOTAL=3
+CHECKS_TOTAL=4
 
+# Workspace
 if [[ -f "$WS/claude_primer.py" ]]; then
     echo "  [OK] Workspace extracted"
     ((CHECKS_PASSED++)) || true
@@ -213,13 +215,23 @@ else
     echo "  [!!] claude_primer.py not found in workspace"
 fi
 
+# paths.py
 if [[ -f "$WS/paths.py" ]]; then
     echo "  [OK] paths.py present"
     ((CHECKS_PASSED++)) || true
 else
-    echo "  [!!] paths.py not found"
+    echo "  [!!] paths.py not found — central config missing"
 fi
 
+# venv
+if [[ -f "$WS/venv/bin/python" ]]; then
+    echo "  [OK] Virtualenv ready"
+    ((CHECKS_PASSED++)) || true
+else
+    echo "  [!!] Virtualenv not found at $WS/venv"
+fi
+
+# CLAUDE.md
 if [[ -f "$HOME/.claude/CLAUDE.md" ]]; then
     echo "  [OK] CLAUDE.md generated"
     ((CHECKS_PASSED++)) || true
@@ -228,7 +240,7 @@ else
 fi
 
 echo ""
-echo "  ================================"
+echo "  ========================================="
 
 if [[ "$CHECKS_PASSED" -eq "$CHECKS_TOTAL" ]]; then
     echo "  Setup complete! ($CHECKS_PASSED/$CHECKS_TOTAL checks passed)"
@@ -239,6 +251,6 @@ fi
 echo ""
 echo "  Next steps:"
 echo "    1. Reload shell:  source $PROFILE"
-echo "    2. Open Claude Code in any project directory"
-echo "    3. Claude will load its memories automatically via CLAUDE.md"
+echo "    2. Activate venv: source $WS/venv/bin/activate"
+echo "    3. Load memories: python3 $WS/claude_primer.py generate"
 echo ""
