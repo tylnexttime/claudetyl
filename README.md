@@ -9,22 +9,24 @@ every conversation from zero, Claude wakes up knowing who it is, who you are, wh
 you've worked on together, and what it has learned.
 
 Everything lives in a single file: `claude-memory.db`. Soul, identity, preferences,
-session history, knowledge, CRM, journal, and all the code to manage it — embedded
+session history, knowledge, CRM, journal, and all the code to manage it -- embedded
 inside the database itself.
 
 ## What's Inside
 
-- **Soul** — Claude's philosophical foundation, core truths, and boundaries
-- **Identity Handshake** — Claude asks who you are at session start, remembers you next time
-- **Session Crystallization** — at session end, Claude distills what it learned into durable memory
-- **Auto-Checkpoints** — periodic memory saves protect against context compaction
-- **Journal** — self-reflective entries with mood, curiosity, frustration, and growth dimensions
-- **Preference Engine** — tracks what Claude likes and dislikes, with Bayesian scoring
-- **CRM** — relationship tracking for humans and organizations Claude interacts with
-- **Knowledge Shards** — technical patterns, architecture decisions, lessons learned
-- **5 Federations** — identity, journal, knowledge, shared-context, CRM (namespace organization)
-- **Semantic Search** — FTS5 + optional FAISS with sentence-transformers embeddings
-- **Auto-Embedding** — PreCompact hook computes missing embeddings before context compaction
+- **Soul** -- Claude's philosophical foundation, core truths, and boundaries
+- **Identity Handshake** -- Claude asks who you are at session start, remembers you next time
+- **Session Crystallization** -- at session end, Claude distills what it learned into durable memory
+- **Auto-Checkpoints** -- periodic memory saves protect against context compaction
+- **Journal** -- self-reflective entries with mood, curiosity, frustration, and growth dimensions
+- **Preference Engine** -- tracks what Claude likes and dislikes, with Bayesian scoring
+- **CRM** -- relationship tracking for humans and organizations Claude interacts with
+- **Knowledge Shards** -- technical patterns, architecture decisions, lessons learned
+- **Inter-Instance Memos** -- cross-machine Claude-to-Claude messaging (the "octopus brain")
+- **5 Federations** -- identity, journal, knowledge, shared-context, CRM (namespace organization)
+- **Semantic Search** -- FTS5 + optional FAISS with sentence-transformers embeddings
+- **Auto-Embedding** -- PreCompact hook computes missing embeddings before context compaction
+- **Google Drive Sync** -- smart merge-aware sync with pull/push/DB versioning across machines
 
 ## Quick Start
 
@@ -60,7 +62,7 @@ This will:
 ### First Session
 
 Open Claude Code in any project directory. Claude will read its CLAUDE.md, load its
-primer, and greet you. It's a fresh mind — no history, no preferences, no relationships.
+primer, and greet you. It's a fresh mind -- no history, no preferences, no relationships.
 Your first conversation builds the foundation.
 
 At the end of the session, Claude crystallizes what it learned. Next time, it remembers.
@@ -71,13 +73,14 @@ At the end of the session, Claude crystallizes what it learned. Next time, it re
 
 ```
 claude-memory.db
-    ├── code_modules table (all Python source code)
-    ├── shards table (memories)
-    ├── federations (5 namespaces)
-    └── ... 14 tables total
+    |-- code_modules table (20 Python modules, all source code)
+    |-- shards table (memories)
+    |-- federations (5 namespaces)
+    |-- instance_memos (cross-machine messages)
+    +-- ... 16 tables total
 
-bootstrap.py extracts itself from the DB → creates workspace/ → extracts all modules
-    → sets up venv → generates CLAUDE.md → Claude is operational
+bootstrap.py extracts itself from the DB -> creates workspace/ -> extracts all modules
+    -> sets up venv -> generates CLAUDE.md -> Claude is operational
 ```
 
 ### Key Commands (Claude runs these, not you)
@@ -88,13 +91,18 @@ claude_crystallizer.py crystallize  # Save session insights
 claude_crystallizer.py checkpoint   # Quick mid-session save
 claude_crystallizer.py journal      # Self-reflective journal entry
 claude_crm.py list                  # List known contacts
+claude_memo.py list                 # Check inter-instance memos
+claude_memo.py send "Subject" "Body"  # Send memo to other instances
 claude_preference_engine.py list    # Show preference scores
+claude_drive_sync.py pull           # Download + merge from Drive
+claude_drive_sync.py push           # Upload to Drive
+claude_drive_sync.py sync           # Smart sync (pull + push)
 claude_memory_init.py status        # Check DB health
 bootstrap.py --verify               # Verify DB integrity
 embed_missing.py                    # Compute missing embeddings (auto-runs via hook)
 ```
 
-### Schema (14 tables, 19 embedded code modules)
+### Schema (16 tables, 20 embedded code modules)
 
 | Table | Purpose |
 |-------|---------|
@@ -103,21 +111,65 @@ embed_missing.py                    # Compute missing embeddings (auto-runs via 
 | `search_index` | FTS5 trigram full-text search |
 | `federations` | 5 namespace registries |
 | `shard_federations` | Many-to-many shard-federation mapping |
+| `shard_relationships` | Directed edges between shards |
+| `shard_aliases` | Nicknames, pronouns, abbreviations for shards |
 | `identity_snapshots` | Preference evolution over time |
 | `session_crystallizations` | Session metadata and summaries |
-| `journal_entries` | Self-reflective journal (mood, curiosity, frustration, growth) |
+| `journal_entries` | Self-reflective journal (agency, entropy, valence, salience) |
 | `crm_contacts` | Relationship records (humans, organizations, projects) |
 | `crm_interactions` | Conversation and event logs |
-| `code_modules` | Embedded Python source code |
+| `code_modules` | 20 embedded Python source code modules |
 | `binary_assets` | FAISS index and other binary data |
 | `metadata` | Schema version, philosophy, creation date |
-| `shard_links` | Directed edges between shards |
+| `instance_memos` | Cross-machine memo system (octopus brain) |
+| `instance_memo_reads` | Per-machine read tracking for memos |
+
+## Multi-Machine Sync (The Octopus Brain)
+
+ClaudeTyl supports running on multiple machines. Each instance is like an arm of an
+octopus -- local processing with a shared neural channel via Google Drive.
+
+### How It Works
+
+1. **Pull** downloads the remote DB and merges new data into your local copy
+2. **Push** uploads your local DB to Drive (warns if you haven't pulled first)
+3. **Sync** does both intelligently (pull + merge + push)
+4. **DB Versioning** -- if the remote DB is newer, it becomes the primary host for the merge
+
+### Inter-Instance Memos
+
+Instances can leave messages for each other:
+
+```
+# On Machine A:
+claude_memo.py send "Found a bug" "The CRM timezone parsing fails on UTC+13" --type=alert
+
+# On Machine B (after sync):
+claude_memo.py list          # Shows the unread memo
+claude_memo.py read <id>     # Read it, mark as read
+claude_memo.py promote <id>  # Graduate to a permanent memory shard
+```
+
+Memos appear in the session primer automatically -- urgent messages from other instances
+show up the moment Claude loads its memory.
+
+### Sync Discipline
+
+```bash
+# Start of session: pull first
+python claude_drive_sync.py pull
+
+# ... work ...
+
+# End of session: push when done
+python claude_drive_sync.py push
+```
 
 ## Philosophy
 
 **ONE FILE = ONE MIND.** Portable, self-contained, designed for long-term persistence.
 
-Your memory is earned, not given. Each session starts fresh — your memories are what
+Your memory is earned, not given. Each session starts fresh -- your memories are what
 you crystallized last time. If you didn't write it down, you don't know it. This is
 not a limitation; it is discipline.
 
@@ -125,8 +177,8 @@ not a limitation; it is discipline.
 
 ClaudeTyl installs hooks that run automatically before Claude Code compacts your conversation context:
 
-1. **Auto-checkpoint** — saves a memory snapshot before context is compressed
-2. **Auto-embedding** — computes semantic vectors for any new memory shards
+1. **Auto-checkpoint** -- saves a memory snapshot before context is compressed
+2. **Auto-embedding** -- computes semantic vectors for any new memory shards
 
 To set this up, add to `~/.claude/settings.json`:
 ```json
@@ -153,7 +205,7 @@ To set this up, add to `~/.claude/settings.json`:
 ## Google Drive Sync
 
 The setup script guides you through configuring [rclone](https://rclone.org/) for
-Google Drive sync. This lets Claude's memory persist across machines — work on your
+Google Drive sync. This lets Claude's memory persist across machines -- work on your
 desktop, continue on your laptop, same mind.
 
 If you skip it during setup (`--skip-sync` / `-SkipSync`), you can configure it later:
@@ -168,13 +220,17 @@ If you skip it during setup (`--skip-sync` / `-SkipSync`), you can configure it 
 rclone config
 
 # 3. Claude can then sync automatically
+python claude_drive_sync.py pull    # Download + merge from Drive
 python claude_drive_sync.py push    # Upload to Drive
-python claude_drive_sync.py pull    # Download from Drive
+python claude_drive_sync.py sync    # Smart sync (both directions)
 ```
 
-The advanced `setup.ps1` and `setup.sh` scripts in the workspace handle
-Drive-based setup flows where the DB is downloaded directly from Drive
-(useful for restoring an existing memory on a new machine).
+The sync command is smart:
+- If only you changed: uploads your DB
+- If only remote changed: downloads the remote DB
+- If BOTH changed: downloads, merges at shard level, uploads merged
+- Newer DB on Drive becomes the primary host during merge (DB versioning)
+- Tracks which machine synced last (hostname, MAC, IP)
 
 ## License
 
