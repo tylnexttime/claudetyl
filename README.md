@@ -234,6 +234,24 @@ The sync command is smart:
 
 ## Changelog
 
+### v2.2.2 (2026-02-19)
+
+**Code improvements** -- 11 modules updated with bug fixes, new features, and
+enhanced functionality from production use across multiple machines.
+
+Changes:
+- **claude_drive_sync.py** -- fixed DETACH-before-COMMIT bug in `merge_databases()` that caused "database remote is locked" errors during cross-machine sync
+- **claude_crystallizer.py** -- expanded crystallization with richer insight extraction and companion exchange support
+- **claude_primer.py** -- improved primer output with companion mailbox integration and better section formatting
+- **memory_enhancements.py** -- major expansion: new dreaming phase, shard promotion pipeline, and dynamic path handling
+- **claude_preference_engine.py** -- refined rubric weights and scoring dimensions
+- **embedding_service.py** -- minor stability improvements
+- **faiss_index.py** -- minor stability improvements
+- **tiered_storage.py** -- minor improvements
+- **bootstrap.py** -- minor improvements
+- **doc_quickstart.py** -- updated documentation
+- **doc_system_guide.py** -- updated documentation
+
 ### v2.2.1 (2025-02-18)
 
 **Template sanitization** -- all embedded code modules are now fully generic. No
