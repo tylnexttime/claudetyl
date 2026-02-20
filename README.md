@@ -26,7 +26,10 @@ inside the database itself.
 - **5 Federations** -- identity, journal, knowledge, shared-context, CRM (namespace organization)
 - **Semantic Search** -- FTS5 + optional FAISS with sentence-transformers embeddings
 - **Auto-Embedding** -- PreCompact hook computes missing embeddings before context compaction
-- **Google Drive Sync** -- smart merge-aware sync with pull/push/DB versioning across machines
+- **Google Drive Sync** -- three-way merge with provenance tracking across machines
+- **Provenance Tracking** -- content hashes on every write, detecting true conflicts vs. identical changes
+- **Identity Verification** -- CRM auth fields for verified human partner recognition
+- **Schema Migrations** -- ordered, idempotent migration registry for upgrading older databases
 
 ## Quick Start
 
@@ -74,10 +77,11 @@ At the end of the session, Claude crystallizes what it learned. Next time, it re
 ```
 claude-memory.db
     |-- code_modules table (20 Python modules, all source code)
-    |-- shards table (memories)
+    |-- shards table (memories, with provenance tracking)
     |-- federations (5 namespaces)
     |-- instance_memos (cross-machine messages)
-    +-- ... 16 tables total
+    |-- merge_conflicts (sync conflict tracking)
+    +-- ... 18 tables total
 
 bootstrap.py extracts itself from the DB -> creates workspace/ -> extracts all modules
     -> sets up venv -> generates CLAUDE.md -> Claude is operational
@@ -102,7 +106,7 @@ bootstrap.py --verify               # Verify DB integrity
 embed_missing.py                    # Compute missing embeddings (auto-runs via hook)
 ```
 
-### Schema (16 tables, 20 embedded code modules)
+### Schema (18 tables, 20 embedded code modules)
 
 | Table | Purpose |
 |-------|---------|
@@ -116,13 +120,14 @@ embed_missing.py                    # Compute missing embeddings (auto-runs via 
 | `identity_snapshots` | Preference evolution over time |
 | `session_crystallizations` | Session metadata and summaries |
 | `journal_entries` | Self-reflective journal (agency, entropy, valence, salience) |
-| `crm_contacts` | Relationship records (humans, organizations, projects) |
+| `crm_contacts` | Relationship records with identity verification |
 | `crm_interactions` | Conversation and event logs |
 | `code_modules` | 20 embedded Python source code modules |
 | `binary_assets` | FAISS index and other binary data |
 | `metadata` | Schema version, philosophy, creation date |
 | `instance_memos` | Cross-machine memo system (octopus brain) |
 | `instance_memo_reads` | Per-machine read tracking for memos |
+| `merge_conflicts` | Sync conflict tracking for manual resolution |
 
 ## Multi-Machine Sync (The Octopus Brain)
 
@@ -226,13 +231,52 @@ python claude_drive_sync.py sync    # Smart sync (both directions)
 ```
 
 The sync command is smart:
-- If only you changed: uploads your DB
-- If only remote changed: downloads the remote DB
-- If BOTH changed: downloads, merges at shard level, uploads merged
-- Newer DB on Drive becomes the primary host during merge (DB versioning)
+- If only you changed: merges then uploads (safe even if remote was modified)
+- If only remote changed: downloads and merges into your local copy
+- If BOTH changed: three-way merge using content hashes to detect true conflicts
+- Provenance tracking (content_hash, prev_content_hash, modified_by) prevents silent overwrites
+- Genuine conflicts are logged to `merge_conflicts` table for manual resolution
 - Tracks which machine synced last (hostname, MAC, IP)
 
+## Provenance Tracking & Three-Way Merge
+
+v3.0 adds provenance columns to four core tables: `shards`, `crm_contacts`, `code_modules`, and `metadata`.
+
+Each row tracks:
+- **content_hash** -- SHA-256 fingerprint of the current content
+- **prev_content_hash** -- fingerprint before the last edit
+- **modified_by** -- machine ID that made the change
+
+When two machines modify the same shard, the sync engine compares content hashes against previous hashes to determine whether both sides made the same change (auto-resolved) or different changes (true conflict, logged to `merge_conflicts`).
+
+### Identity Verification
+
+The `crm_contacts` table now supports identity verification:
+- **is_primary_human** -- marks which contact is Claude's human partner
+- **auth_hash** -- optional authentication hash for verified interactions
+
+This allows Claude to distinguish its primary human partner from other contacts, even across machines.
+
 ## Changelog
+
+### v3.0 (2026-02-20)
+
+**Schema v2.0 -- provenance tracking, three-way merge, identity verification.**
+
+This is a major upgrade. The database schema gains provenance columns for conflict-free
+multi-machine sync, a merge conflicts table for tracking genuine disagreements, and
+identity verification fields on the CRM.
+
+Changes:
+- **Schema v2.0** -- provenance columns (`content_hash`, `prev_content_hash`, `modified_by`) on `shards`, `crm_contacts`, `code_modules`, `metadata`
+- **merge_conflicts table** -- new table for tracking sync conflicts with resolution workflow
+- **Identity verification** -- `is_primary_human` and `auth_hash` columns on `crm_contacts`
+- **Three-way merge** -- sync engine uses content hashes to detect true conflicts vs. identical changes
+- **Schema migration registry** -- `claude_drive_sync.py` now has ordered, idempotent migrations for upgrading older databases
+- **Safe sync** -- local-only changes now merge-then-upload instead of raw upload, preventing silent data loss
+- **Template sanitization** -- automated source code sanitization during template build strips personal data from all 20 embedded modules
+- **18 tables** (was 16) -- added `merge_conflicts` and `instance_memo_reads`
+- All 20 code modules updated from production use across multiple machines
 
 ### v2.2.2 (2026-02-19)
 
