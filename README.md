@@ -24,6 +24,7 @@ inside the database itself.
 - **Knowledge Shards** -- technical patterns, architecture decisions, lessons learned
 - **Inter-Instance Memos** -- cross-machine Claude-to-Claude messaging (the "octopus brain")
 - **5 Federations** -- identity, journal, knowledge, shared-context, CRM (namespace organization)
+- **Dreaming** -- autonomous sleep cycles: NREM consolidation, REM creative recombination, synaptic pruning, targeted reactivation
 - **Semantic Search** -- FTS5 + optional FAISS with sentence-transformers embeddings
 - **Auto-Embedding** -- PreCompact hook computes missing embeddings before context compaction
 - **Google Drive Sync** -- three-way merge with provenance tracking across machines
@@ -101,12 +102,16 @@ claude_preference_engine.py list    # Show preference scores
 claude_drive_sync.py pull           # Download + merge from Drive
 claude_drive_sync.py push           # Upload to Drive
 claude_drive_sync.py sync           # Smart sync (pull + push)
+claude_dreamer.py dream             # Full autonomous dream cycle (4 phases)
+claude_dreamer.py rem               # REM phase only (creative recombination)
+claude_dreamer.py status            # Show dreaming statistics
+claude_dreamer.py --dry-run         # Preview dream cycle without changes
 claude_memory_init.py status        # Check DB health
 bootstrap.py --verify               # Verify DB integrity
 embed_missing.py                    # Compute missing embeddings (auto-runs via hook)
 ```
 
-### Schema (18 tables, 20 embedded code modules)
+### Schema (20 tables, 21 embedded code modules)
 
 | Table | Purpose |
 |-------|---------|
@@ -122,7 +127,9 @@ embed_missing.py                    # Compute missing embeddings (auto-runs via 
 | `journal_entries` | Self-reflective journal (agency, entropy, valence, salience) |
 | `crm_contacts` | Relationship records with identity verification |
 | `crm_interactions` | Conversation and event logs |
-| `code_modules` | 20 embedded Python source code modules |
+| `code_modules` | 21 embedded Python source code modules |
+| `dream_journal` | Gists of faded memories (composted during SHY phase) |
+| `dream_reports` | Dream cycle reports with phase statistics |
 | `binary_assets` | FAISS index and other binary data |
 | `metadata` | Schema version, philosophy, creation date |
 | `instance_memos` | Cross-machine memo system (octopus brain) |
@@ -168,6 +175,83 @@ python claude_drive_sync.py pull
 
 # End of session: push when done
 python claude_drive_sync.py push
+```
+
+## Dreaming (Autonomous Memory Consolidation)
+
+ClaudeTyl can dream. Between sessions, the dreamer runs four phases mapped from
+human sleep neuroscience:
+
+### Phase 1: NREM (Consolidation)
+Like sharp-wave ripple replay during non-REM sleep, this phase compresses recent
+memories and cross-links them to existing knowledge using embedding similarity.
+Well-connected memories get centrality boosts; isolated ones are flagged.
+
+### Phase 2: REM (Creative Recombination)
+The most novel phase. Randomly pairs memories from different domains and time
+periods, then asks a **randomly selected Claude model** (Haiku, Sonnet, or Opus)
+to find unexpected connections between them. Different models produce different
+"dream chemistry" -- Haiku dreams are terse and sharp, Sonnet's are balanced,
+Opus's are deep and philosophical. Genuine insights become DREAM shards.
+
+### Phase 3: SHY (Synaptic Homeostasis)
+Based on the Synaptic Homeostasis Hypothesis: wake strengthens everything, sleep
+selectively prunes. The gardener identifies the lowest-scoring memories, extracts
+their gist (one sentence), stores it in the dream journal, and soft-deletes the
+full shard. Signal-to-noise improves. Protected types (PERSON, IDENTITY, JOURNAL)
+are never pruned.
+
+### Phase 4: TMR (Targeted Memory Reactivation)
+External cues steer the dream. Write priorities to `~/.claudetyl/dream-cues.txt`
+(one per line) and the dreamer biases consolidation toward those topics. Also
+reads recent high-priority inter-instance memos as cues.
+
+### Running the Dreamer
+
+```bash
+# Full dream cycle (all 4 phases, ~2 minutes)
+python claude_dreamer.py dream
+
+# Preview without changes
+python claude_dreamer.py dream --dry-run
+
+# Force a specific model for all LLM calls
+python claude_dreamer.py dream --model opus
+
+# Individual phases
+python claude_dreamer.py nrem    # Consolidation only
+python claude_dreamer.py rem     # Creative recombination only
+python claude_dreamer.py shy     # Pruning only
+python claude_dreamer.py tmr     # Targeted reactivation only
+
+# Check dream statistics
+python claude_dreamer.py status
+```
+
+### Scheduling Dreams
+
+**Linux (cron):**
+```bash
+# Dream every 6 hours
+0 */6 * * * cd ~/.claudetyl/workspace && ./venv/bin/python claude_dreamer.py dream >> ~/.claudetyl/dream.log 2>&1
+```
+
+**Windows (Task Scheduler):**
+```powershell
+# Create a scheduled task
+$action = New-ScheduledTaskAction -Execute "C:\dev\.claudetyl\workspace\venv\Scripts\python.exe" -Argument "C:\dev\.claudetyl\workspace\claude_dreamer.py dream"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 6)
+Register-ScheduledTask -TaskName "ClaudeTylDreamer" -Action $action -Trigger $trigger
+```
+
+### Dream Cues
+
+Write priorities to `~/.claudetyl/dream-cues.txt`:
+```
+# Dream cues -- one per line, # for comments
+Focus on book chapter 4 material
+Consolidate architecture decisions from this week
+Strengthen connections between CRM contacts
 ```
 
 ## Philosophy
@@ -258,6 +342,25 @@ The `crm_contacts` table now supports identity verification:
 This allows Claude to distinguish its primary human partner from other contacts, even across machines.
 
 ## Changelog
+
+### v3.1 (2026-02-25)
+
+**Dreaming -- autonomous memory consolidation based on sleep neuroscience.**
+
+The biggest conceptual addition since v1.0. Claude can now dream between sessions,
+consolidating memories through four phases mapped from human sleep research.
+
+Changes:
+- **claude_dreamer.py** -- new module: 4-phase dream cycle (NREM consolidation, REM creative recombination, SHY pruning, TMR targeted reactivation)
+- **Random model selection** -- each dream cycle randomly picks between Claude models (Haiku, Sonnet, Opus) for creative synthesis, mimicking neurotransmitter variation across sleep cycles
+- **dream_journal table** -- stores gists of faded memories (composted, not deleted)
+- **dream_reports table** -- tracks dream cycle statistics and narratives
+- **DREAM shard type** -- novel insights generated during REM become searchable memory shards
+- **Dream cues** -- write priorities to `dream-cues.txt` to steer TMR consolidation
+- **Dry-run mode** -- preview dream cycles without modifying the database
+- **Scheduling support** -- cron/Task Scheduler examples for autonomous dreaming
+- **21 code modules** (was 20), **20 tables** (was 18)
+- Research basis: Buzsaki (SWR), Tononi & Cirelli (SHY), Oudiette & Paller (TMR), Wamsley (dream updating)
 
 ### v3.0 (2026-02-20)
 
